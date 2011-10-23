@@ -34,6 +34,7 @@
 #include "ap.h"
 #include "p2p_supplicant.h"
 #include "p2p/p2p.h"
+#include "wfd/wfd_i.h"
 #include "notify.h"
 #include "bss.h"
 #include "scan.h"
@@ -3065,7 +3066,113 @@ static int p2p_ctrl_ext_listen(struct wpa_supplicant *wpa_s, char *cmd)
 }
 
 #endif /* CONFIG_P2P */
+#ifdef CONFIG_WFD
+static int wfd_ctrl_set(struct wpa_supplicant *wpa_s, char *cmd)
+{
+	char *param;
 
+	if (wpa_s->global->wfd == NULL)
+		return -1;
+
+	param = os_strchr(cmd, ' ');
+	if (param == NULL)
+		return -1;
+	*param++ = '\0';
+
+	if (os_strcmp(cmd, "type") == 0) {
+		wfd_set_type(wpa_s->global->wfd, atoi(param), wpa_s);
+		return 0;
+	}
+
+	if (os_strcmp(cmd, "coupled_sink_by_source") == 0) {
+		wfd_set_coupled_sink_by_source(wpa_s->global->wfd,
+						atoi(param), wpa_s);
+		return 0;
+	}
+
+	if (os_strcmp(cmd, "coupled_sink_by_sink") == 0) {
+		wfd_set_coupled_sink_by_sink(wpa_s->global->wfd,
+					atoi(param), wpa_s);
+		return 0;
+	}
+
+	if (os_strcmp(cmd, "session_available") == 0) {
+		wfd_set_session_available(wpa_s->global->wfd,
+				atoi(param), wpa_s);
+		return 0;
+	}
+
+
+	if (os_strcmp(cmd, "service_discovery") == 0) {
+		wfd_set_service_discovery(wpa_s->global->wfd,
+					atoi(param), wpa_s);
+		return 0;
+	}
+
+	if (os_strcmp(cmd, "preferred_connectivity") == 0) {
+		wfd_set_preferred_connectivity(wpa_s->global->wfd,
+						atoi(param), wpa_s);
+		return 0;
+	}
+
+	if (os_strcmp(cmd, "content_protection") == 0) {
+		wfd_set_content_protection(wpa_s->global->wfd,
+						atoi(param), wpa_s);
+		return 0;
+	}
+
+	if (os_strcmp(cmd, "time_sync") == 0) {
+		wfd_set_time_sync(wpa_s->global->wfd,
+					atoi(param), wpa_s);
+		return 0;
+	}
+
+	if (os_strcmp(cmd, "time_sync") == 0) {
+		wfd_set_time_sync(wpa_s->global->wfd,
+					atoi(param), wpa_s);
+		return 0;
+	}
+
+	if (os_strcmp(cmd, "session_mgmt_port") == 0) {
+		wfd_set_session_mgmt_port(wpa_s->global->wfd,
+						atoi(param), wpa_s);
+		return 0;
+	}
+
+	if (os_strcmp(cmd, "dev_max_tp") == 0) {
+		wfd_set_dev_max_tp(wpa_s->global->wfd, atoi(param), wpa_s);
+		return 0;
+	}
+
+	if (os_strcmp(cmd, "enabled") == 0) {
+		wpa_s->global->wfd_enabled = atoi(param);
+		wpa_printf(MSG_DEBUG, "WFD functionality %s",
+			wpa_s->global->wfd_enabled ? "enabled" : "disabled");
+		wfd_set_enabled(wpa_s->global->wfd, atoi(param));
+		return 0;
+	}
+
+	return -1;
+}
+
+static int wfd_ctrl_get(struct wpa_supplicant *wpa_s,
+				char *cmd, char *reply, size_t reply_size)
+{
+
+	if (wpa_s->global->wfd == NULL)
+		return -1;
+
+	if (os_strcmp(cmd, "show") == 0) {
+		return wfd_get_show_param(wpa_s->global->wfd,
+						reply, reply_size);
+	}
+	if (os_strcmp(cmd, "dev_info") == 0) {
+		return wfd_get_dev_info(wpa_s->global->wfd,
+						reply, reply_size);
+	}
+	return -1;
+}
+#endif /* CONFIG_WFD */
 
 static int wpa_supplicant_ctrl_iface_sta_autoconnect(
 	struct wpa_supplicant *wpa_s, char *cmd)
@@ -3523,6 +3630,14 @@ char * wpa_supplicant_ctrl_iface_process(struct wpa_supplicant *wpa_s,
 	} else if (os_strncmp(buf, "DRIVER ", 7) == 0) {
 		reply_len = wpa_supplicant_driver_cmd(wpa_s, buf + 7, reply,
 						      reply_size);
+#ifdef CONFIG_WFD
+	} else if (os_strncmp(buf, "WFD_SET ", 8) == 0) {
+		if (wfd_ctrl_set(wpa_s, buf + 8) < 0)
+			reply_len = -1;
+	} else if (os_strncmp(buf, "WFD_GET ", 8) == 0) {
+			reply_len = wfd_ctrl_get(wpa_s,
+					buf + 8, reply, reply_size);
+#endif /* CONFIG_WFD */
 	} else {
 		os_memcpy(reply, "UNKNOWN COMMAND\n", 16);
 		reply_len = 16;
