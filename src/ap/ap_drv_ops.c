@@ -57,13 +57,22 @@ int hostapd_build_ap_extra_ies(struct hostapd_data *hapd,
 		*beacon = wpabuf_alloc((hapd->wps_beacon_ie ?
 					wpabuf_len(hapd->wps_beacon_ie) : 0) +
 				       (hapd->p2p_beacon_ie ?
-					wpabuf_len(hapd->p2p_beacon_ie) : 0));
+					wpabuf_len(hapd->p2p_beacon_ie) : 0)
+#ifdef CONFIG_WFD
+					+ (hapd->wfd_beacon_ie ?
+					wpabuf_len(hapd->wfd_beacon_ie) : 0)
+#endif /* CONFIG_WFD */
+					);
 		if (*beacon == NULL)
 			return -1;
 		if (hapd->wps_beacon_ie)
 			wpabuf_put_buf(*beacon, hapd->wps_beacon_ie);
 		if (hapd->p2p_beacon_ie)
 			wpabuf_put_buf(*beacon, hapd->p2p_beacon_ie);
+#ifdef CONFIG_WFD
+		if (hapd->wfd_beacon_ie)
+			wpabuf_put_buf(*beacon, hapd->wfd_beacon_ie);
+#endif /* CONFIG_WFD */
 	}
 
 	if (hapd->wps_probe_resp_ie == NULL && hapd->p2p_probe_resp_ie == NULL)
@@ -73,7 +82,13 @@ int hostapd_build_ap_extra_ies(struct hostapd_data *hapd,
 			(hapd->wps_probe_resp_ie ?
 			 wpabuf_len(hapd->wps_probe_resp_ie) : 0) +
 			(hapd->p2p_probe_resp_ie ?
-			 wpabuf_len(hapd->p2p_probe_resp_ie) : 0));
+			 wpabuf_len(hapd->p2p_probe_resp_ie) : 0)
+#ifdef CONFIG_WFD
+			+ (hapd->wfd_probe_resp_ie ?
+				wpabuf_len(hapd->wfd_probe_resp_ie) : 0)
+#endif /* CONFIG_WFD */
+			);
+
 		if (*proberesp == NULL) {
 			wpabuf_free(*beacon);
 			return -1;
@@ -82,6 +97,10 @@ int hostapd_build_ap_extra_ies(struct hostapd_data *hapd,
 			wpabuf_put_buf(*proberesp, hapd->wps_probe_resp_ie);
 		if (hapd->p2p_probe_resp_ie)
 			wpabuf_put_buf(*proberesp, hapd->p2p_probe_resp_ie);
+#ifdef CONFIG_WFD
+		if (hapd->wfd_probe_resp_ie)
+			wpabuf_put_buf(*proberesp, hapd->wfd_probe_resp_ie);
+#endif /* CONFIG_WFD */
 	}
 #endif /* CONFIG_P2P */
 
