@@ -28,6 +28,7 @@
 #include "wpas_glue.h"
 #include "wps_supplicant.h"
 #include "p2p_supplicant.h"
+#include "wfd/wfd_i.h"
 #include "notify.h"
 #include "blacklist.h"
 #include "bss.h"
@@ -237,7 +238,19 @@ void sme_authenticate(struct wpa_supplicant *wpa_s,
 			wpa_s->sme.assoc_req_ie_len += res;
 	}
 #endif /* CONFIG_P2P */
-
+#ifdef CONFIG_WFD
+	if (wpa_s->global->wfd) {
+		u8 *pos;
+		size_t len;
+		int res;
+		pos = wpa_s->sme.assoc_req_ie + wpa_s->sme.assoc_req_ie_len;
+		len = sizeof(wpa_s->sme.assoc_req_ie) -
+			wpa_s->sme.assoc_req_ie_len;
+		res = wfd_build_assoc_req_ie(wpa_s->global->wfd, len, pos);
+		if (res >= 0)
+			wpa_s->sme.assoc_req_ie_len += res;
+	}
+#endif /* CONFIG_WFD */
 	wpa_supplicant_cancel_sched_scan(wpa_s);
 	wpa_supplicant_cancel_scan(wpa_s);
 

@@ -213,6 +213,13 @@ struct p2p_peer_info {
 	size_t wps_sec_dev_type_list_len;
 
 	struct wpabuf *wps_vendor_ext[P2P_MAX_WPS_VENDOR_EXT];
+	/**
+     * Wi-Fi display peer info
+	*/
+#ifdef CONFIG_WFD
+	struct wpabuf   *wfd_ie;
+	struct wfd_peer_info *wfd;
+#endif /* CONFIG_WFD */
 };
 
 enum p2p_prov_disc_status {
@@ -1529,5 +1536,15 @@ int p2p_set_oper_channel(struct p2p_data *p2p, u8 op_reg_class, u8 op_channel,
 			 int cfg_op_channel);
 
 int p2p_prepare_channel(struct p2p_data *p2p, unsigned int force_freq);
+
+#ifdef CONFIG_WFD
+struct wfd_data;
+/**
+ * p2p_register_wfd - Register WFD module at P2P
+ * @p2p: P2P module context from p2p_init()
+ * @wfd: WFD module context
+ */
+void p2p_register_wfd(struct p2p_data *p2p, struct wfd_data *wfd);
+#endif /* CONFIG_WFD */
 
 #endif /* P2P_H */

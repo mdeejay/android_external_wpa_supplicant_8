@@ -49,6 +49,7 @@
 #include "bgscan.h"
 #include "bss.h"
 #include "scan.h"
+#include "wfd/wfd_i.h"
 
 const char *wpa_supplicant_version =
 "wpa_supplicant v" VERSION_STR "\n"
@@ -433,6 +434,9 @@ static void wpa_supplicant_cleanup(struct wpa_supplicant *wpa_s)
 	wpas_p2p_deinit(wpa_s);
 #endif /* CONFIG_P2P */
 
+#ifdef CONFIG_WFD
+	wfd_deinit(wpa_s);
+#endif /* CONFIG_WFD */
 	os_free(wpa_s->next_scan_freqs);
 	wpa_s->next_scan_freqs = NULL;
 }
@@ -592,6 +596,9 @@ void wpa_supplicant_set_state(struct wpa_supplicant *wpa_s,
 #ifdef CONFIG_P2P
 		wpas_p2p_completed(wpa_s);
 #endif /* CONFIG_P2P */
+#ifdef CONFIG_WFD
+		wfd_connection_completed(wpa_s);
+#endif /* CONFIG_WFD */
 	} else if (state == WPA_DISCONNECTED || state == WPA_ASSOCIATING ||
 		   state == WPA_ASSOCIATED) {
 		wpa_s->new_connection = 1;
@@ -1253,6 +1260,18 @@ void wpa_supplicant_associate(struct wpa_supplicant *wpa_s,
 		}
 	}
 #endif /* CONFIG_P2P */
+#ifdef CONFIG_WFD
+	if (wpa_s->global->wfd) {
+		u8 *pos;
+		size_t len;
+		int res;
+		pos = wpa_ie + wpa_ie_len;
+		len = sizeof(wpa_ie) - wpa_ie_len;
+		res = wfd_build_assoc_req_ie(wpa_s->global->wfd, len, pos);
+		if (res >= 0)
+			wpa_ie_len += res;
+	}
+#endif /* CONFIG_WFD */
 
 	wpa_clear_keys(wpa_s, bss ? bss->bssid : NULL);
 	use_crypt = 1;
@@ -1442,6 +1461,9 @@ static void wpa_supplicant_clear_connection(struct wpa_supplicant *wpa_s,
 	old_ssid = wpa_s->current_ssid;
 	wpa_s->current_ssid = NULL;
 	wpa_s->current_bss = NULL;
+#ifdef CONFIG_WFD
+	wfd_clear_connection(wpa_s);
+#endif /* CONFIG_WFD */
 	wpa_sm_set_config(wpa_s->wpa, NULL);
 	eapol_sm_notify_config(wpa_s->eapol, NULL, NULL);
 	if (old_ssid != wpa_s->current_ssid)
@@ -2300,12 +2322,22 @@ next_driver:
 			   wpa_s->conf->ctrl_interface);
 		return -1;
 	}
+#ifdef CONFIG_WFD
+	if (wfd_init(wpa_s->global, wpa_s) < 0) {
+		wpa_msg(wpa_s, MSG_ERROR, "Failed to init WFD");
+		return -1;
+	}
+#endif /* CONFIG_WFD */
 
 #ifdef CONFIG_P2P
 	if (wpas_p2p_init(wpa_s->global, wpa_s) < 0) {
 		wpa_msg(wpa_s, MSG_ERROR, "Failed to init P2P");
 		return -1;
 	}
+#ifdef CONFIG_WFD
+	wpas_p2p_register_wfd(wpa_s->global);
+#endif /* CONFIG_WFD */
+
 #endif /* CONFIG_P2P */
 
 	if (wpa_bss_init(wpa_s) < 0)

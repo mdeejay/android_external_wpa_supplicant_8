@@ -492,6 +492,9 @@ int wpa_supplicant_create_ap(struct wpa_supplicant *wpa_s,
 			wpa_s, ssid->p2p_persistent_group,
 			ssid->mode == WPAS_MODE_P2P_GROUP_FORMATION);
 #endif /* CONFIG_P2P */
+#ifdef CONFIG_WFD
+		hapd_iface->bss[i]->wfd = wpa_s->global->wfd;
+#endif /* CONFIG_WFD */
 		hapd_iface->bss[i]->setup_complete_cb = wpas_ap_configured_cb;
 		hapd_iface->bss[i]->setup_complete_cb_ctx = wpa_s;
 	}
@@ -539,6 +542,10 @@ void wpa_supplicant_ap_deinit(struct wpa_supplicant *wpa_s)
 		wpa_s->ap_iface->bss[0]->p2p_group = NULL;
 	wpas_p2p_group_deinit(wpa_s);
 #endif /* CONFIG_P2P */
+#ifdef CONFIG_WFD
+	if (wpa_s->ap_iface->bss)
+		wpa_s->ap_iface->bss[0]->wfd = NULL;
+#endif /* CONFIG_WFD */
 	hostapd_interface_deinit(wpa_s->ap_iface);
 	hostapd_interface_free(wpa_s->ap_iface);
 	wpa_s->ap_iface = NULL;

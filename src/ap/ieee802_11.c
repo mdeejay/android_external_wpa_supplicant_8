@@ -1011,7 +1011,18 @@ static void send_assoc_resp(struct hostapd_data *hapd, struct sta_info *sta,
 	if (hapd->conf->p2p & P2P_MANAGE)
 		p = hostapd_eid_p2p_manage(hapd, p);
 #endif /* CONFIG_P2P_MANAGER */
-
+#ifdef CONFIG_WFD
+	if (hapd->wfd) {
+		struct wpabuf *wfd_resp_ie;
+		wfd_resp_ie = wfd_build_assoc_resp_ie(hapd->wfd);
+		if (wfd_resp_ie) {
+			os_memcpy(p, wpabuf_head(wfd_resp_ie),
+				  wpabuf_len(wfd_resp_ie));
+			p += wpabuf_len(wfd_resp_ie);
+			wpabuf_free(wfd_resp_ie);
+		}
+	}
+#endif /* CONFIG_WFD */
 	send_len += p - reply->u.assoc_resp.variable;
 
 	if (hostapd_drv_send_mlme(hapd, reply, send_len) < 0)

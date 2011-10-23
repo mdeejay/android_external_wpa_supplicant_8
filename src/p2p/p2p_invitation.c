@@ -63,7 +63,9 @@ static struct wpabuf * p2p_build_invitation_req(struct p2p_data *p2p,
 	p2p_buf_add_group_id(buf, dev_addr, p2p->inv_ssid, p2p->inv_ssid_len);
 	p2p_buf_add_device_info(buf, p2p, peer);
 	p2p_buf_update_ie_hdr(buf, len);
-
+#ifdef CONFIG_WFD
+	wfd_build_invitation_req_ie(p2p->wfd, buf);
+#endif
 	return buf;
 }
 
@@ -96,6 +98,9 @@ static struct wpabuf * p2p_build_invitation_resp(struct p2p_data *p2p,
 	if (channels)
 		p2p_buf_add_channel_list(buf, p2p->cfg->country, channels);
 	p2p_buf_update_ie_hdr(buf, len);
+#ifdef CONFIG_WFD
+	wfd_build_invitation_resp_ie(p2p->wfd, buf);
+#endif
 
 	return buf;
 }

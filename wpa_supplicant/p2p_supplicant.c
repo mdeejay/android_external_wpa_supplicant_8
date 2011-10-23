@@ -21,6 +21,7 @@
 #include "common/wpa_ctrl.h"
 #include "wps/wps_i.h"
 #include "p2p/p2p.h"
+#include "wfd/wfd_i.h"
 #include "ap/hostapd.h"
 #include "ap/p2p_hostapd.h"
 #include "eapol_supp/eapol_supp_sm.h"
@@ -58,6 +59,11 @@ static void wpas_p2p_cross_connect_setup(struct wpa_supplicant *wpa_s);
 static void wpas_p2p_group_idle_timeout(void *eloop_ctx, void *timeout_ctx);
 static void wpas_p2p_set_group_idle_timeout(struct wpa_supplicant *wpa_s);
 
+#ifdef CONFIG_WFD
+#define ADD_LEN	124
+#else
+#define ADD_LEN 100
+#endif /* CONFIG_WFD */
 
 static void wpas_p2p_scan_res_handler(struct wpa_supplicant *wpa_s,
 				      struct wpa_scan_results *scan_res)
@@ -109,8 +115,7 @@ static int wpas_p2p_scan(void *ctx, enum p2p_scan_type type, int freq,
 					num_req_dev_types, req_dev_types);
 	if (wps_ie == NULL)
 		return -1;
-
-	ies = wpabuf_alloc(wpabuf_len(wps_ie) + 100);
+	ies = wpabuf_alloc(wpabuf_len(wps_ie) + ADD_LEN);
 	if (ies == NULL) {
 		wpabuf_free(wps_ie);
 		return -1;
@@ -1216,13 +1221,29 @@ void wpas_dev_found(void *ctx, const u8 *addr,
 	wpa_msg(wpa_s, MSG_INFO, P2P_EVENT_DEVICE_FOUND MACSTR
 		" p2p_dev_addr=" MACSTR
 		" pri_dev_type=%s name='%s' config_methods=0x%x "
-		"dev_capab=0x%x group_capab=0x%x",
+		"dev_capab=0x%x group_capab=0x%x"
+#ifdef CONFIG_WFD
+		" "
+		"wfd=0x%x "
+		"wfd_dev_info=0x%x "
+		"wfd_mng_port=%d "
+		"wfd_max_tp=%d"
+#endif /* CONFIG_WFD */
+		,
 		MAC2STR(addr), MAC2STR(info->p2p_device_addr),
 		wps_dev_type_bin2str(info->pri_dev_type, devtype,
 				     sizeof(devtype)),
 		info->device_name, info->config_methods,
-		info->dev_capab, info->group_capab);
-
+		info->dev_capab, info->group_capab
+#ifdef CONFIG_WFD
+		,
+		info->wfd_ie ? 1 : 0,
+		info->wfd_ie ? info->wfd->device_info_bitmap : 0,
+		info->wfd_ie ? info->wfd->session_mng_port : 0,
+		info->wfd_ie ? info->wfd->maximum_tp : 0
+#endif /* CONFIG_WFD */
+		);
+#
 	wpas_notify_p2p_device_found(ctx, info->p2p_device_addr, new_device);
 }
 
@@ -2549,6 +2570,12 @@ int wpas_p2p_init(struct wpa_global *global, struct wpa_supplicant *wpa_s)
 	return 0;
 }
 
+#ifdef CONFIG_WFD
+void wpas_p2p_register_wfd(struct wpa_global *global)
+{
+	p2p_register_wfd(global->p2p, global->wfd);
+}
+#endif /* CONFIG_WFD */
 
 /**
  * wpas_p2p_deinit - Deinitialize per-interface P2P data
@@ -2818,7 +2845,7 @@ static void wpas_p2p_join_scan(void *eloop_ctx, void *timeout_ctx)
 		return;
 	}
 
-	ies = wpabuf_alloc(wpabuf_len(wps_ie) + 100);
+	ies = wpabuf_alloc(wpabuf_len(wps_ie) + ADD_LEN);
 	if (ies == NULL) {
 		wpabuf_free(wps_ie);
 		wpas_p2p_scan_res_join(wpa_s, NULL);

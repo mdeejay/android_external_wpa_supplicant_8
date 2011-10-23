@@ -225,6 +225,8 @@ struct wpa_global {
 	struct dl_list p2p_srv_upnp; /* struct p2p_srv_upnp */
 	int p2p_disabled;
 	int cross_connection;
+	struct wfd_data *wfd;
+	int wfd_enabled;
 };
 
 
