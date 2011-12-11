@@ -379,6 +379,64 @@ struct wpabuf *wpa_supplicant_extra_ies(struct wpa_supplicant *wpa_s,
 	return wps_ie;
 }
 
+
+static struct hostapd_hw_modes * get_mode(struct hostapd_hw_modes *modes,
+					  u16 num_modes,
+					  enum hostapd_hw_mode mode)
+{
+	u16 i;
+
+	for (i = 0; i < num_modes; i++) {
+		if (modes[i].mode == mode)
+			return &modes[i];
+	}
+
+	return NULL;
+}
+
+
+static void wpa_setband_scan_freqs_list(struct wpa_supplicant *wpa_s,
+					enum hostapd_hw_mode band,
+					struct wpa_driver_scan_params *params)
+{
+	/* Include only supported channels for the specified band */
+	struct hostapd_hw_modes *mode;
+	int count, i;
+
+	mode = get_mode(wpa_s->hw.modes, wpa_s->hw.num_modes, band);
+	if (mode == NULL) {
+		/* No channels supported in this band - use empty list */
+		params->freqs = os_zalloc(sizeof(int));
+		return;
+	}
+
+	params->freqs = os_zalloc((mode->num_channels + 1) * sizeof(int));
+	if (params->freqs == NULL)
+		return;
+	for (count = 0, i = 0; i < mode->num_channels; i++) {
+		if (mode->channels[i].flag & HOSTAPD_CHAN_DISABLED)
+			continue;
+		params->freqs[count++] = mode->channels[i].freq;
+	}
+}
+
+
+static void wpa_setband_scan_freqs(struct wpa_supplicant *wpa_s,
+				   struct wpa_driver_scan_params *params)
+{
+	if (wpa_s->hw.modes == NULL)
+		return; /* unknown what channels the driver supports */
+	if (params->freqs)
+		return; /* already using a limited channel set */
+	if (wpa_s->setband == WPA_SETBAND_5G)
+		wpa_setband_scan_freqs_list(wpa_s, HOSTAPD_MODE_IEEE80211A,
+					    params);
+	else if (wpa_s->setband == WPA_SETBAND_2G)
+		wpa_setband_scan_freqs_list(wpa_s, HOSTAPD_MODE_IEEE80211G,
+					    params);
+}
+
+
 static void wpa_supplicant_scan(void *eloop_ctx, void *timeout_ctx)
 {
 	struct wpa_supplicant *wpa_s = eloop_ctx;
@@ -451,6 +509,17 @@ static void wpa_supplicant_scan(void *eloop_ctx, void *timeout_ctx)
 			return;
 		}
 	}
+
+#ifdef CONFIG_P2P
+	if (wpa_s->p2p_in_provisioning && wpa_s->go_params) {
+		wpa_printf(MSG_DEBUG, "P2P: Use specific SSID for scan during "
+			   "P2P provisioning");
+		params.ssids[0].ssid = wpa_s->go_params->ssid;
+		params.ssids[0].ssid_len = wpa_s->go_params->ssid_len;
+		params.num_ssids = 1;
+		goto ssid_list_set;
+	}
+#endif /* CONFIG_P2P */
 
 	/* Find the starting point from which to continue scanning */
 	ssid = wpa_s->conf->ssid;
@@ -546,6 +615,9 @@ static void wpa_supplicant_scan(void *eloop_ctx, void *timeout_ctx)
 		wpa_dbg(wpa_s, MSG_DEBUG, "Starting AP scan for wildcard "
 			"SSID");
 	}
+#ifdef CONFIG_P2P
+ssid_list_set:
+#endif /* CONFIG_P2P */
 
 	wpa_supplicant_optimize_freqs(wpa_s, &params);
 	wps_ie = wpa_supplicant_extra_ies(wpa_s, &params);
@@ -557,6 +629,7 @@ static void wpa_supplicant_scan(void *eloop_ctx, void *timeout_ctx)
 	} else
 		os_free(wpa_s->next_scan_freqs);
 	wpa_s->next_scan_freqs = NULL;
+	wpa_setband_scan_freqs(wpa_s, &params);
 
 	params.filter_ssids = wpa_supplicant_build_filter_ssids(
 		wpa_s->conf, &params.num_filter_ssids);
@@ -746,6 +819,8 @@ start_scan:
 
 	if (wpa_s->wps)
 		wps_ie = wpa_supplicant_extra_ies(wpa_s, &params);
+
+	wpa_setband_scan_freqs(wpa_s, &params);
 
 	if (wpa_s->sched_scan_intervals_supported) {
 		wpa_dbg(wpa_s, MSG_DEBUG, "Starting sched scan: "

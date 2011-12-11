@@ -1381,6 +1381,10 @@ static void nl80211_cqm_event(struct wpa_driver_nl80211_data *drv,
 		wpa_printf(MSG_DEBUG, "nl80211: Connection quality monitor "
 			   "event: RSSI low");
 		ed.signal_change.above_threshold = 0;
+	} else if (event == NL80211_CQM_RSSI_BEACON_LOSS) {
+		wpa_printf(MSG_DEBUG, "nl80211: Connection quality monitor "
+			   "event: beacon loss!");
+		wpa_supplicant_event(drv->ctx, EVENT_START_ROAMING, &ed);
 	} else
 		return;
 
@@ -6949,6 +6953,14 @@ static int wpa_driver_nl80211_deinit_ap(void *priv)
 	return wpa_driver_nl80211_set_mode(priv, NL80211_IFTYPE_STATION);
 }
 
+static int wpa_driver_nl80211_deinit_p2p_cli(void *priv)
+{
+	struct i802_bss *bss = priv;
+	struct wpa_driver_nl80211_data *drv = bss->drv;
+	if (drv->nlmode != NL80211_IFTYPE_P2P_CLIENT)
+		return -1;
+	return wpa_driver_nl80211_set_mode(priv, NL80211_IFTYPE_STATION);
+}
 
 static void wpa_driver_nl80211_resume(void *priv)
 {
@@ -7263,6 +7275,7 @@ const struct wpa_driver_ops wpa_driver_nl80211_ops = {
 	wpa_driver_nl80211_cancel_remain_on_channel,
 	.probe_req_report = wpa_driver_nl80211_probe_req_report,
 	.deinit_ap = wpa_driver_nl80211_deinit_ap,
+	.deinit_p2p_cli = wpa_driver_nl80211_deinit_p2p_cli,
 	.resume = wpa_driver_nl80211_resume,
 	.send_ft_action = nl80211_send_ft_action,
 	.signal_monitor = nl80211_signal_monitor,

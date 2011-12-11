@@ -56,11 +56,38 @@ static void p2p_expire_peers(struct p2p_data *p2p)
 {
 	struct p2p_device *dev, *n;
 	struct os_time now;
+	size_t i;
 
 	os_get_time(&now);
 	dl_list_for_each_safe(dev, n, &p2p->devices, struct p2p_device, list) {
 		if (dev->last_seen.sec + P2P_PEER_EXPIRATION_AGE >= now.sec)
 			continue;
+
+		if (p2p->cfg->go_connected &&
+		    p2p->cfg->go_connected(p2p->cfg->cb_ctx,
+					   dev->info.p2p_device_addr)) {
+			/*
+			 * We are connected as a client to a group in which the
+			 * peer is the GO, so do not expire the peer entry.
+			 */
+			os_get_time(&dev->last_seen);
+			continue;
+		}
+
+		for (i = 0; i < p2p->num_groups; i++) {
+			if (p2p_group_is_client_connected(
+				    p2p->groups[i], dev->info.p2p_device_addr))
+				break;
+		}
+		if (i < p2p->num_groups) {
+			/*
+			 * The peer is connected as a client in a group where
+			 * we are the GO, so do not expire the peer entry.
+			 */
+			os_get_time(&dev->last_seen);
+			continue;
+		}
+
 		wpa_msg(p2p->cfg->msg_ctx, MSG_DEBUG, "P2P: Expiring old peer "
 			"entry " MACSTR, MAC2STR(dev->info.p2p_device_addr));
 		dl_list_del(&dev->list);
@@ -506,7 +533,8 @@ int p2p_add_device(struct p2p_data *p2p, const u8 *addr, int freq, int level,
 	struct p2p_device *dev;
 	struct p2p_message msg;
 	const u8 *p2p_dev_addr;
-	int i;
+	int i, changed = 0;
+	enum p2p_go_state old_state;
 
 	os_memset(&msg, 0, sizeof(msg));
 	if (p2p_parse_ies(ies, ies_len, &msg)) {
@@ -576,12 +604,16 @@ int p2p_add_device(struct p2p_data *p2p, const u8 *addr, int freq, int level,
 			"results (" MACSTR " %d -> %d MHz (DS param %d)",
 			MAC2STR(dev->info.p2p_device_addr), dev->listen_freq,
 			freq, msg.ds_params ? *msg.ds_params : -1);
+		changed = 1;
 	}
 	dev->listen_freq = freq;
-#ifdef ANDROID_BRCM_P2P_PATCH	
+
+	old_state = dev->go_state;
 	if(msg.group_info)
 		dev->go_state = REMOTE_GO;
-#endif
+	else
+		dev->go_state = UNKNOWN_GO;
+	changed |= (old_state != dev->go_state);
 
 	if (msg.group_info)
 		dev->oper_freq = freq;
@@ -631,7 +663,7 @@ int p2p_add_device(struct p2p_data *p2p, const u8 *addr, int freq, int level,
 	if (p2p_pending_sd_req(p2p, dev))
 		dev->flags |= P2P_DEV_SD_SCHEDULE;
 
-	if (dev->flags & P2P_DEV_REPORTED)
+	if ((dev->flags & P2P_DEV_REPORTED) && !changed)
 		return 0;
 
 	wpa_msg(p2p->cfg->msg_ctx, MSG_DEBUG,
@@ -655,9 +687,10 @@ static void p2p_device_free(struct p2p_data *p2p, struct p2p_device *dev)
 	int i;
 
 	if (p2p->go_neg_peer == dev) {
-#ifdef ANDROID_BRCM_P2P_PATCH
+		/*
+		 * If GO Negotiation is in progress, report that it has failed.
+		 */
 		p2p_go_neg_failed(p2p, dev, -1);
-#endif
 		p2p->go_neg_peer = NULL;
 	}
 	if (p2p->invite_peer == dev)

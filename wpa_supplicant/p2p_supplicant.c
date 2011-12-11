@@ -45,6 +45,14 @@
  */
 #define P2P_MAX_JOIN_SCAN_ATTEMPTS 10
 
+#ifndef P2P_MAX_CLIENT_IDLE
+/*
+ * How many seconds to try to reconnect to the GO when connection in P2P client
+ * role has been lost.
+ */
+#define P2P_MAX_CLIENT_IDLE 10
+#endif /* P2P_MAX_CLIENT_IDLE */
+
 
 static void wpas_p2p_long_listen_timeout(void *eloop_ctx, void *timeout_ctx);
 static struct wpa_supplicant *
@@ -229,8 +237,6 @@ static void wpas_p2p_group_delete(struct wpa_supplicant *wpa_s)
 	char *gtype;
 	const char *reason;
 
-	eloop_cancel_timeout(wpas_p2p_group_idle_timeout, wpa_s, NULL);
-
 	ssid = wpa_s->current_ssid;
 	if (ssid == NULL) {
 		/*
@@ -252,6 +258,7 @@ static void wpas_p2p_group_delete(struct wpa_supplicant *wpa_s)
 		 (ssid && ssid->mode == WPAS_MODE_INFRA)) {
 		wpa_s->reassociate = 0;
 		wpa_s->disconnected = 1;
+		wpa_s->roaming = 0;
 		wpa_supplicant_deauthenticate(wpa_s,
 					      WLAN_REASON_DEAUTH_LEAVING);
 		gtype = "client";
@@ -279,6 +286,9 @@ static void wpas_p2p_group_delete(struct wpa_supplicant *wpa_s)
 	}
 	wpa_msg(wpa_s->parent, MSG_INFO, P2P_EVENT_GROUP_REMOVED "%s %s%s",
 		wpa_s->ifname, gtype, reason);
+
+	if (eloop_cancel_timeout(wpas_p2p_group_idle_timeout, wpa_s, NULL) > 0)
+		wpa_printf(MSG_DEBUG, "P2P: Cancelled P2P group idle timeout");
 
 	if (ssid)
 		wpas_notify_p2p_group_removed(wpa_s, ssid, gtype);
@@ -325,7 +335,10 @@ static void wpas_p2p_group_delete(struct wpa_supplicant *wpa_s)
 		wpa_printf(MSG_DEBUG, "P2P: Temporary group network not "
 			   "found");
 	}
-	wpa_supplicant_ap_deinit(wpa_s);
+	if (wpa_s->ap_iface)
+		wpa_supplicant_ap_deinit(wpa_s);
+	else
+		wpa_drv_deinit_p2p_cli(wpa_s);
 }
 
 
@@ -930,7 +943,7 @@ static void p2p_go_configured(void *ctx, void *data)
 	}
 	if (params->wps_method == WPS_PBC)
 		wpa_supplicant_ap_wps_pbc(wpa_s, params->peer_interface_addr,
-					  NULL);
+					  params->peer_device_addr);
 	else if (wpa_s->p2p_pin[0])
 		wpa_supplicant_ap_wps_pin(wpa_s, params->peer_interface_addr,
 					  wpa_s->p2p_pin, NULL, 0);
@@ -1255,10 +1268,10 @@ void wpas_dev_found(void *ctx, const u8 *addr,
 static void wpas_dev_lost(void *ctx, const u8 *dev_addr)
 {
 	struct wpa_supplicant *wpa_s = ctx;
-#ifdef ANDROID_BRCM_P2P_PATCH
+
 	wpa_msg(wpa_s, MSG_INFO, P2P_EVENT_DEVICE_LOST
 		"p2p_dev_addr=" MACSTR, MAC2STR(dev_addr));
-#endif
+
 	wpas_notify_p2p_device_lost(wpa_s, dev_addr);
 }
 
@@ -2513,8 +2526,7 @@ struct p2p_oper_class_map {
 static int wpas_p2p_setup_channels(struct wpa_supplicant *wpa_s,
 				   struct p2p_channels *chan)
 {
-	struct hostapd_hw_modes *modes, *mode;
-	u16 num_modes, flags;
+	struct hostapd_hw_modes *mode;
 	int cla, op;
 	struct p2p_oper_class_map op_class[] = {
 		{ HOSTAPD_MODE_IEEE80211G, 81, 1, 13, 1, BW20 },
@@ -2532,8 +2544,7 @@ static int wpas_p2p_setup_channels(struct wpa_supplicant *wpa_s,
 		{ -1, 0, 0, 0, 0, BW20 }
 	};
 
-	modes = wpa_drv_get_hw_feature_data(wpa_s, &num_modes, &flags);
-	if (modes == NULL) {
+	if (wpa_s->hw.modes == NULL) {
 		wpa_printf(MSG_DEBUG, "P2P: Driver did not support fetching "
 			   "of all supported channels; assume dualband "
 			   "support");
@@ -2547,7 +2558,7 @@ static int wpas_p2p_setup_channels(struct wpa_supplicant *wpa_s,
 		u8 ch;
 		struct p2p_reg_class *reg = NULL;
 
-		mode = get_mode(modes, num_modes, o->mode);
+		mode = get_mode(wpa_s->hw.modes, wpa_s->hw.num_modes, o->mode);
 		if (mode == NULL)
 			continue;
 		for (ch = o->min_chan; ch <= o->max_chan; ch += o->inc) {
@@ -2580,8 +2591,6 @@ static int wpas_p2p_setup_channels(struct wpa_supplicant *wpa_s,
 
 	chan->reg_classes = cla;
 
-	ieee80211_sta_free_hw_features(modes, num_modes);
-
 	return 0;
 }
 
@@ -2599,6 +2608,26 @@ static int wpas_get_noa(void *ctx, const u8 *interface_addr, u8 *buf,
 		return -1;
 
 	return wpa_drv_get_noa(wpa_s, buf, buf_len);
+}
+
+
+static int wpas_go_connected(void *ctx, const u8 *dev_addr)
+{
+	struct wpa_supplicant *wpa_s = ctx;
+
+	for (wpa_s = wpa_s->global->ifaces; wpa_s; wpa_s = wpa_s->next) {
+		struct wpa_ssid *ssid = wpa_s->current_ssid;
+		if (ssid == NULL)
+			continue;
+		if (ssid->mode != WPAS_MODE_INFRA)
+			continue;
+		if (wpa_s->wpa_state != WPA_COMPLETED)
+			continue;
+		if (os_memcmp(wpa_s->go_dev_addr, dev_addr, ETH_ALEN) == 0)
+			return 1;
+	}
+
+	return 0;
 }
 
 
@@ -2671,6 +2700,7 @@ int wpas_p2p_init(struct wpa_global *global, struct wpa_supplicant *wpa_s)
 	p2p.invitation_received = wpas_invitation_received;
 	p2p.invitation_result = wpas_invitation_result;
 	p2p.get_noa = wpas_get_noa;
+	p2p.go_connected = wpas_go_connected;
 
 #ifdef ANDROID_BRCM_P2P_PATCH
 	/* P2P_ADDR: Using p2p_dev_addr to hold the actual p2p device address incase if
@@ -4228,11 +4258,19 @@ int wpas_p2p_ext_listen(struct wpa_supplicant *wpa_s, unsigned int period,
 }
 
 
+static int wpas_p2p_is_client(struct wpa_supplicant *wpa_s)
+{
+	return wpa_s->current_ssid != NULL &&
+		wpa_s->current_ssid->p2p_group &&
+		wpa_s->current_ssid->mode == WPAS_MODE_INFRA;
+}
+
+
 static void wpas_p2p_group_idle_timeout(void *eloop_ctx, void *timeout_ctx)
 {
 	struct wpa_supplicant *wpa_s = eloop_ctx;
 
-	if (wpa_s->conf->p2p_group_idle == 0) {
+	if (wpa_s->conf->p2p_group_idle == 0 && !wpas_p2p_is_client(wpa_s)) {
 		wpa_printf(MSG_DEBUG, "P2P: Ignore group idle timeout - "
 			   "disabled");
 		return;
@@ -4247,17 +4285,26 @@ static void wpas_p2p_group_idle_timeout(void *eloop_ctx, void *timeout_ctx)
 
 static void wpas_p2p_set_group_idle_timeout(struct wpa_supplicant *wpa_s)
 {
-	eloop_cancel_timeout(wpas_p2p_group_idle_timeout, wpa_s, NULL);
-	if (wpa_s->conf->p2p_group_idle == 0)
-		return;
+	unsigned int timeout;
+
+	if (eloop_cancel_timeout(wpas_p2p_group_idle_timeout, wpa_s, NULL) > 0)
+		wpa_printf(MSG_DEBUG, "P2P: Cancelled P2P group idle timeout");
 
 	if (wpa_s->current_ssid == NULL || !wpa_s->current_ssid->p2p_group)
 		return;
 
+	timeout = wpa_s->conf->p2p_group_idle;
+	if (wpa_s->current_ssid->mode == WPAS_MODE_INFRA &&
+	    (timeout == 0 || timeout > P2P_MAX_CLIENT_IDLE))
+	    timeout = P2P_MAX_CLIENT_IDLE;
+
+	if (timeout == 0)
+		return;
+
 	wpa_printf(MSG_DEBUG, "P2P: Set P2P group idle timeout to %u seconds",
-		   wpa_s->conf->p2p_group_idle);
-	eloop_register_timeout(wpa_s->conf->p2p_group_idle, 0,
-			       wpas_p2p_group_idle_timeout, wpa_s, NULL);
+		   timeout);
+	eloop_register_timeout(timeout, 0, wpas_p2p_group_idle_timeout,
+			       wpa_s, NULL);
 }
 
 
@@ -4551,15 +4598,18 @@ void wpas_p2p_notif_connected(struct wpa_supplicant *wpa_s)
 		wpas_p2p_disable_cross_connect(wpa_s);
 	else
 		wpas_p2p_enable_cross_connect(wpa_s);
-	if (!wpa_s->ap_iface)
-		eloop_cancel_timeout(wpas_p2p_group_idle_timeout, wpa_s, NULL);
+	if (!wpa_s->ap_iface &&
+	    eloop_cancel_timeout(wpas_p2p_group_idle_timeout, wpa_s, NULL) > 0)
+		wpa_printf(MSG_DEBUG, "P2P: Cancelled P2P group idle timeout");
 }
 
 
 void wpas_p2p_notif_disconnected(struct wpa_supplicant *wpa_s)
 {
 	wpas_p2p_disable_cross_connect(wpa_s);
-	if (!wpa_s->ap_iface)
+	if (!wpa_s->ap_iface &&
+	    !eloop_is_timeout_registered(wpas_p2p_group_idle_timeout,
+					 wpa_s, NULL))
 		wpas_p2p_set_group_idle_timeout(wpa_s);
 }
 

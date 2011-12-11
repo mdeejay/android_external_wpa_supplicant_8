@@ -127,6 +127,13 @@ static int wpa_supplicant_ctrl_iface_set(struct wpa_supplicant *wpa_s,
 			ret = -1;
 		wpa_tdls_enable(wpa_s->wpa, !disabled);
 #endif /* CONFIG_TDLS */
+	} else if (os_strcasecmp(cmd, "roaming_disabled") == 0) {
+		int disabled = atoi(value);
+		wpa_printf(MSG_DEBUG, "roaming_disabled=%d", disabled);
+		if (disabled)
+			wpa_supplicant_disable_roaming(wpa_s);
+		else
+			wpa_supplicant_enable_roaming(wpa_s);
 	} else {
 		value[-1] = '=';
 		ret = wpa_config_process_global(wpa_s->conf, cmd, -1);
@@ -2164,6 +2171,61 @@ static int wpa_supplicant_ctrl_iface_scan_interval(
 	return 0;
 }
 
+static int wpa_supplicant_ctrl_iface_sched_scan_intervals(
+	struct wpa_supplicant *wpa_s, char *cmd)
+
+{
+	char *long_interval_str, *num_shorts_str;
+	int short_interval, long_interval, num_short_intervals;
+
+	/* cmd: <short interval> <long interval> <number of short intervals>" */
+	long_interval_str = os_strchr(cmd, ' ');
+	if (long_interval_str == NULL)
+		return -1;
+	*long_interval_str++ = '\0';
+
+	num_shorts_str = os_strchr(long_interval_str, ' ');
+	if (num_shorts_str == NULL)
+		return -1;
+	*num_shorts_str++ = '\0';
+
+	short_interval = atoi(cmd);
+	if (short_interval <= 0 || short_interval > MAX_SCHED_SCAN_INTERVAL) {
+		wpa_printf(MSG_DEBUG,
+			   "Invalid short interval: %d", short_interval);
+		return -1;
+	}
+
+	long_interval = atoi(long_interval_str);
+	if (long_interval <= 0 || long_interval > MAX_SCHED_SCAN_INTERVAL) {
+		wpa_printf(MSG_DEBUG,
+			   "Invalid long interval: %d", long_interval);
+		return -1;
+	}
+
+	num_short_intervals = atoi(num_shorts_str);
+	if (num_short_intervals < 0 ||
+	    num_short_intervals > MAX_NUM_SCHED_SCAN_SHORT_INTERVALS) {
+		wpa_printf(MSG_DEBUG, "Invalid num short intervals: %d",
+			   num_short_intervals);
+		return -1;
+	}
+
+	wpa_printf(MSG_DEBUG, "CTRL_IFACE: SCHED_SCAN_INTERVALS "
+		   "short=%d long=%d num_short=%d",
+		   short_interval, long_interval, num_short_intervals);
+
+	wpa_s->conf->sched_scan_short_interval = short_interval;
+	wpa_s->conf->sched_scan_long_interval = long_interval;
+	wpa_s->conf->sched_scan_num_short_intervals = num_short_intervals;
+
+	/* Restart sched scan with the new parameters in case already running */
+	if (wpa_s->sched_scanning)
+		wpa_supplicant_req_sched_scan(wpa_s);
+
+	return 0;
+}
+
 
 static int wpa_supplicant_ctrl_iface_bss_expire_age(
 	struct wpa_supplicant *wpa_s, char *cmd)
@@ -3298,7 +3360,29 @@ static int wpa_supplicant_driver_cmd(struct wpa_supplicant *wpa_s, char *cmd,
 {
 	int ret;
 
-	ret = wpa_drv_driver_cmd(wpa_s, cmd, buf, buflen);
+	if (os_strncasecmp(cmd, "SETBAND ", 8) == 0) {
+		int val = atoi(cmd + 8);
+		/*
+		 * Use driver_cmd for drivers that support it, but ignore the
+		 * return value since scan requests from wpa_supplicant will
+		 * provide a list of channels to scan for based on the SETBAND
+		 * setting.
+		 */
+		wpa_printf(MSG_DEBUG, "SETBAND: %d", val);
+		wpa_drv_driver_cmd(wpa_s, cmd, buf, buflen);
+		ret = 0;
+		if (val == 0)
+			wpa_s->setband = WPA_SETBAND_AUTO;
+		else if (val == 1)
+			wpa_s->setband = WPA_SETBAND_5G;
+		else if (val == 2)
+			wpa_s->setband = WPA_SETBAND_2G;
+		else
+			ret = -1;
+	} else {
+		ret = wpa_drv_driver_cmd(wpa_s, cmd, buf, buflen);
+	}
+
 	if (ret == 0)
 		ret = sprintf(buf, "%s\n", "OK");
 	return ret;
@@ -3323,6 +3407,7 @@ char * wpa_supplicant_ctrl_iface_process(struct wpa_supplicant *wpa_s,
 			level = MSG_EXCESSIVE;
 		wpa_hexdump_ascii(level, "RX ctrl_iface",
 				  (const u8 *) buf, os_strlen(buf));
+		wpa_printf(level, "ctrl_iface: %s", buf);
 	}
 
 	reply = os_malloc(reply_size);
@@ -3493,6 +3578,11 @@ char * wpa_supplicant_ctrl_iface_process(struct wpa_supplicant *wpa_s,
 	} else if (os_strncmp(buf, "P2P_CONNECT ", 12) == 0) {
 		reply_len = p2p_ctrl_connect(wpa_s, buf + 12, reply,
 					     reply_size);
+	} else if (os_strncmp(buf, "P2P_LISTEN", 10) == 0) {
+		wpa_printf(MSG_DEBUG, "WORKAROUND: "
+			   "execute p2p_find instead of p2p_listen");
+		if (p2p_ctrl_find(wpa_s, ""))
+			reply_len = -1;
 	} else if (os_strncmp(buf, "P2P_LISTEN ", 11) == 0) {
 		if (p2p_ctrl_listen(wpa_s, buf + 11))
 			reply_len = -1;
@@ -3665,6 +3755,10 @@ char * wpa_supplicant_ctrl_iface_process(struct wpa_supplicant *wpa_s,
 			reply_len = -1;
 	} else if (os_strncmp(buf, "SCAN_INTERVAL ", 14) == 0) {
 		if (wpa_supplicant_ctrl_iface_scan_interval(wpa_s, buf + 14))
+			reply_len = -1;
+	} else if (os_strncmp(buf, "SCHED_SCAN_INTERVALS ", 21) == 0) {
+		if (wpa_supplicant_ctrl_iface_sched_scan_intervals(
+			    wpa_s, buf + 21))
 			reply_len = -1;
 	} else if (os_strcmp(buf, "INTERFACE_LIST") == 0) {
 		reply_len = wpa_supplicant_global_iface_list(
