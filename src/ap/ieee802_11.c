@@ -1698,19 +1698,17 @@ static void handle_assoc_cb(struct hostapd_data *hapd,
 	struct sta_info *sta;
 	int new_assoc = 1;
 
-	if (!ok) {
-		hostapd_logger(hapd, mgmt->da, HOSTAPD_MODULE_IEEE80211,
-			       HOSTAPD_LEVEL_DEBUG,
-			       "did not acknowledge association response");
-		hostapd_drv_sta_remove(hapd, mgmt->da);
-		return;
-	}
-
 	if (len < IEEE80211_HDRLEN + (reassoc ? sizeof(mgmt->u.reassoc_resp) :
 				      sizeof(mgmt->u.assoc_resp))) {
 		printf("handle_assoc_cb(reassoc=%d) - too short payload "
 		       "(len=%lu)\n", reassoc, (unsigned long) len);
-		hostapd_drv_sta_remove(hapd, mgmt->da);
+		return;
+	}
+
+	sta = ap_get_sta(hapd, mgmt->da);
+	if (!sta) {
+		printf("handle_assoc_cb: STA " MACSTR " not found\n",
+		       MAC2STR(mgmt->da));
 		return;
 	}
 
@@ -1719,18 +1717,17 @@ static void handle_assoc_cb(struct hostapd_data *hapd,
 	else
 		status = le_to_host16(mgmt->u.assoc_resp.status_code);
 
-	sta = ap_get_sta(hapd, mgmt->da);
-	if (!sta) {
-		printf("handle_assoc_cb: STA " MACSTR " not found\n",
-		       MAC2STR(mgmt->da));
-		hostapd_drv_sta_remove(hapd, mgmt->da);
+	if (!ok) {
+		hostapd_logger(hapd, mgmt->da, HOSTAPD_MODULE_IEEE80211,
+			       HOSTAPD_LEVEL_DEBUG,
+			       "did not acknowledge association response");
+		if (status == WLAN_STATUS_SUCCESS)
+			hostapd_drv_sta_remove(hapd, sta->addr);
 		return;
 	}
 
-	if (status != WLAN_STATUS_SUCCESS) {
-		hostapd_drv_sta_remove(hapd, sta->addr);
+	if (status != WLAN_STATUS_SUCCESS)
 		goto fail;
-	}
 
 	/* Stop previous accounting session, if one is started, and allocate
 	 * new session id for the new session. */

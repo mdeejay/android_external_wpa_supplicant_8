@@ -398,6 +398,8 @@ void ieee802_11_set_beacon(struct hostapd_data *hapd)
 	u8 *pos, *tail, *tailpos;
 	u16 capab_info;
 	size_t head_len, tail_len;
+	struct wpa_driver_ap_params params;
+	struct wpabuf *beacon, *proberesp, *assocresp;
 
 #ifdef CONFIG_P2P
 	if ((hapd->conf->p2p & (P2P_ENABLED | P2P_GROUP_OWNER)) == P2P_ENABLED)
@@ -509,11 +511,43 @@ void ieee802_11_set_beacon(struct hostapd_data *hapd)
 
 	tail_len = tailpos > tail ? tailpos - tail : 0;
 
-	if (hostapd_drv_set_beacon(hapd, (u8 *) head, head_len,
-				   tail, tail_len, hapd->conf->dtim_period,
-				   hapd->iconf->beacon_int))
-		wpa_printf(MSG_ERROR, "Failed to set beacon head/tail or DTIM "
-			   "period");
+	os_memset(&params, 0, sizeof(params));
+	params.head = (u8 *) head;
+	params.head_len = head_len;
+	params.tail = tail;
+	params.tail_len = tail_len;
+	params.dtim_period = hapd->conf->dtim_period;
+	params.beacon_int = hapd->iconf->beacon_int;
+	params.ssid = (u8 *) hapd->conf->ssid.ssid;
+	params.ssid_len = hapd->conf->ssid.ssid_len;
+	params.pairwise_ciphers = hapd->conf->rsn_pairwise ?
+		hapd->conf->rsn_pairwise : hapd->conf->wpa_pairwise;
+	params.group_cipher = hapd->conf->wpa_group;
+	params.key_mgmt_suites = hapd->conf->wpa_key_mgmt;
+	params.auth_algs = hapd->conf->auth_algs;
+	params.wpa_version = hapd->conf->wpa;
+	params.privacy = hapd->conf->ssid.wep.keys_set || hapd->conf->wpa ||
+		(hapd->conf->ieee802_1x &&
+		 (hapd->conf->default_wep_key_len ||
+		  hapd->conf->individual_wep_key_len));
+	switch (hapd->conf->ignore_broadcast_ssid) {
+	case 0:
+		params.hide_ssid = NO_SSID_HIDING;
+		break;
+	case 1:
+		params.hide_ssid = HIDDEN_SSID_ZERO_LEN;
+		break;
+	case 2:
+		params.hide_ssid = HIDDEN_SSID_ZERO_CONTENTS;
+		break;
+	}
+	hostapd_build_ap_extra_ies(hapd, &beacon, &proberesp, &assocresp);
+	params.beacon_ies = beacon;
+	params.proberesp_ies = proberesp;
+	params.assocresp_ies = assocresp;
+	if (hostapd_drv_set_ap(hapd, &params))
+		wpa_printf(MSG_ERROR, "Failed to set beacon parameters");
+	hostapd_free_ap_extra_ies(hapd, beacon, proberesp, assocresp);
 
 	os_free(tail);
 	os_free(head);
