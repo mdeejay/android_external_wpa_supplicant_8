@@ -229,14 +229,19 @@ wpa_supplicant_delayed_sched_scan_timeout(void *eloop_ctx, void *timeout_ctx)
 static int
 wpa_supplicant_start_sched_scan(struct wpa_supplicant *wpa_s,
 				struct wpa_driver_scan_params *params,
-				int interval)
+				int long_interval,
+				int short_interval,
+				u8 num_short_intervals)
 {
 	int ret;
 
 	if (wpa_s->drv_flags & WPA_DRIVER_FLAGS_USER_SPACE_MLME)
 		return -EOPNOTSUPP;
 
-	ret = wpa_drv_sched_scan(wpa_s, params, interval * 1000);
+	ret = wpa_drv_sched_scan(wpa_s, params,
+				 long_interval * 1000,
+				 short_interval * 1000,
+				 num_short_intervals);
 	if (!ret)
 		wpa_s->sched_scanning = 1;
 
@@ -461,6 +466,7 @@ static void wpa_supplicant_scan(void *eloop_ctx, void *timeout_ctx)
 
 	if (scan_req != 2 && wpa_s->conf->ap_scan == 2) {
 		wpa_s->connect_without_scan = NULL;
+		wpa_s->prev_scan_wildcard = 0;
 		wpa_supplicant_assoc_try(wpa_s, ssid);
 		return;
 #ifndef ANDROID
@@ -509,15 +515,31 @@ static void wpa_supplicant_scan(void *eloop_ctx, void *timeout_ctx)
 		int_array_sort_unique(params.freqs);
 	}
 
-	if (ssid) {
-		wpa_s->prev_scan_ssid = ssid;
-		if (max_ssids > 1) {
-			wpa_dbg(wpa_s, MSG_DEBUG, "Include wildcard SSID in "
-				"the scan request");
-			params.num_ssids++;
+	if (ssid && max_ssids == 1) {
+		/* If the driver is limited to 1 ssid at a time
+		 * interleave wildcard SSID scans with specific SSID scans
+		 * to avoid waiting a long time for a wildcard scan.
+		 */
+		if (!wpa_s->prev_scan_wildcard) {
+			params.ssids[0].ssid = NULL;
+			params.ssids[0].ssid_len = 0;
+			wpa_s->prev_scan_wildcard = 1;
+			wpa_dbg(wpa_s, MSG_DEBUG, "Starting AP scan for wildcard "
+				"SSID (Interleave with specific)");
+		} else {
+			wpa_s->prev_scan_ssid = ssid;
+			wpa_s->prev_scan_wildcard = 0;
+			wpa_dbg(wpa_s, MSG_DEBUG,
+				"Starting AP scan for specific SSID: %s",
+				wpa_ssid_txt(ssid->ssid, ssid->ssid_len));
 		}
-		wpa_dbg(wpa_s, MSG_DEBUG, "Starting AP scan for specific "
-			"SSID(s)");
+	} else if (ssid) {
+		/* max_ssids > 1 */
+
+		wpa_s->prev_scan_ssid = ssid;
+		wpa_dbg(wpa_s, MSG_DEBUG, "Include wildcard SSID in "
+			"the scan request");
+		params.num_ssids++;
 	} else {
 		wpa_s->prev_scan_ssid = WILDCARD_SSID_SCAN;
 		params.num_ssids++;
@@ -725,11 +747,26 @@ start_scan:
 	if (wpa_s->wps)
 		wps_ie = wpa_supplicant_extra_ies(wpa_s, &params);
 
-	wpa_dbg(wpa_s, MSG_DEBUG, "Starting sched scan: interval %d",
-		wpa_s->sched_scan_interval);
+	if (wpa_s->sched_scan_intervals_supported) {
+		wpa_dbg(wpa_s, MSG_DEBUG, "Starting sched scan: "
+			" short interval %d long_interval %d"
+			" num_short_intervals %d",
+			wpa_s->conf->sched_scan_short_interval,
+			wpa_s->conf->sched_scan_long_interval,
+			wpa_s->conf->sched_scan_num_short_intervals);
 
-	ret = wpa_supplicant_start_sched_scan(wpa_s, &params,
-					      wpa_s->sched_scan_interval);
+		ret = wpa_supplicant_start_sched_scan(wpa_s, &params,
+				   wpa_s->conf->sched_scan_long_interval,
+				   wpa_s->conf->sched_scan_short_interval,
+				   wpa_s->conf->sched_scan_num_short_intervals);
+	} else {
+		wpa_dbg(wpa_s, MSG_DEBUG, "Starting sched scan: interval %d",
+			wpa_s->conf->sched_scan_long_interval);
+
+		ret = wpa_supplicant_start_sched_scan(wpa_s, &params,
+				   wpa_s->conf->sched_scan_long_interval, 0, 0);
+	}
+
 	wpabuf_free(wps_ie);
 	if (params.filter_ssids)
 		os_free(params.filter_ssids);

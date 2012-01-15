@@ -379,6 +379,9 @@ struct wpa_supplicant {
 	void *drv_priv; /* private data used by driver_ops */
 	void *global_drv_priv;
 
+	/* previous scan was wildcard when interleaving between
+	 * wildcard scans and specific SSID scan when max_ssids=1 */
+	int prev_scan_wildcard;
 	struct wpa_ssid *prev_scan_ssid; /* previously scanned SSID;
 					  * NULL = not yet initialized (start
 					  * with wildcard SSID)
@@ -435,6 +438,7 @@ struct wpa_supplicant {
 	int max_scan_ssids;
 	int max_sched_scan_ssids;
 	int sched_scan_supported;
+	int sched_scan_intervals_supported;
 	int max_match_sets;
 	unsigned int max_remain_on_chan;
 	unsigned int max_stations;
@@ -565,6 +569,7 @@ struct wpa_supplicant {
 	struct wpa_ssid *bgscan_ssid;
 	const struct bgscan_ops *bgscan;
 	void *bgscan_priv;
+	int roaming_disabled;
 
 	struct wpa_ssid *connect_without_scan;
 
@@ -601,6 +606,8 @@ void wpa_supplicant_req_auth_timeout(struct wpa_supplicant *wpa_s,
 				     int sec, int usec);
 void wpa_supplicant_set_state(struct wpa_supplicant *wpa_s,
 			      enum wpa_states state);
+void wpa_supplicant_start_bgscan(struct wpa_supplicant *wpa_s);
+void wpa_supplicant_stop_bgscan(struct wpa_supplicant *wpa_s);
 struct wpa_ssid * wpa_supplicant_get_ssid(struct wpa_supplicant *wpa_s);
 const char * wpa_supplicant_get_eap_mode(struct wpa_supplicant *wpa_s);
 void wpa_supplicant_cancel_auth_timeout(struct wpa_supplicant *wpa_s);

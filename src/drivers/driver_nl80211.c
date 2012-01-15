@@ -1403,6 +1403,25 @@ static void nl80211_cqm_event(struct wpa_driver_nl80211_data *drv,
 }
 
 
+static void nl80211_roaming_support_event(struct wpa_driver_nl80211_data *drv,
+					  struct nlattr *tb[])
+{
+	int enabled;
+	enum wpa_event_type event;
+
+	enabled = (tb[NL80211_ATTR_ROAMING_DISABLED] == NULL);
+
+	if (enabled)
+		event = EVENT_ROAMING_ENABLED;
+	else
+		event = EVENT_ROAMING_DISABLED;
+
+	wpa_printf(MSG_DEBUG, "nl80211: roaming %s",
+		   enabled ? "enabled" : "disabled");
+
+	wpa_supplicant_event(drv->ctx, event, NULL);
+}
+
 static void nl80211_new_station_event(struct wpa_driver_nl80211_data *drv,
 				      struct nlattr **tb)
 {
@@ -1582,6 +1601,9 @@ static int process_event(struct nl_msg *msg, void *arg)
 	case NL80211_CMD_NOTIFY_CQM:
 		nl80211_cqm_event(drv, tb);
 		break;
+	case NL80211_CMD_ROAMING_SUPPORT:
+		nl80211_roaming_support_event(drv, tb);
+		break;
 	case NL80211_CMD_REG_CHANGE:
 		wpa_printf(MSG_DEBUG, "nl80211: Regulatory domain change");
 		wpa_supplicant_event(drv->ctx, EVENT_CHANNEL_LIST_CHANGED,
@@ -1672,6 +1694,7 @@ struct wiphy_info_data {
 	int offchan_tx_supported;
 	int max_remain_on_chan;
 	int sched_scan_supported;
+	int sched_scan_intervals_supported;
 	int max_match_sets;
 };
 
@@ -1735,6 +1758,12 @@ static int wiphy_info_handler(struct nl_msg *msg, void *arg)
 		}
 	}
 
+	if (tb[NL80211_ATTR_FEATURE_FLAGS]) {
+		int features = nla_get_u32(tb[NL80211_ATTR_FEATURE_FLAGS]);
+		if (features & NL80211_FEATURE_SCHED_SCAN_INTERVALS)
+			info->sched_scan_intervals_supported = 1;
+	}
+
 	if (tb[NL80211_ATTR_OFFCHANNEL_TX_OK])
 		info->offchan_tx_supported = 1;
 
@@ -1796,6 +1825,8 @@ static int wpa_driver_nl80211_capa(struct wpa_driver_nl80211_data *drv)
 	drv->capa.max_scan_ssids = info.max_scan_ssids;
 	drv->capa.max_sched_scan_ssids = info.max_sched_scan_ssids;
 	drv->capa.sched_scan_supported = info.sched_scan_supported;
+	drv->capa.sched_scan_intervals_supported =
+		info.sched_scan_intervals_supported;
 	drv->capa.max_match_sets = info.max_match_sets;
 
 	if (info.ap_supported)
@@ -2514,12 +2545,16 @@ nla_put_failure:
  * wpa_driver_nl80211_sched_scan - Initiate a scheduled scan
  * @priv: Pointer to private driver data from wpa_driver_nl80211_init()
  * @params: Scan parameters
- * @interval: interval between scan cycles
+ * @long_interval: interval between scan cycles after end of short cycles
+ * @short_interval: interval between initial short scan cycles
+ * @num_short_intervals: number of interval short scan intervals
  * Returns: 0 on success, -1 on failure or if not supported
  */
 static int wpa_driver_nl80211_sched_scan(void *priv,
 					 struct wpa_driver_scan_params *params,
-					 u32 interval)
+					 u32 long_interval,
+					 u32 short_interval,
+					 u8 num_short_intervals)
 {
 	struct i802_bss *bss = priv;
 	struct wpa_driver_nl80211_data *drv = bss->drv;
@@ -2547,7 +2582,17 @@ static int wpa_driver_nl80211_sched_scan(void *priv,
 
 	NLA_PUT_U32(msg, NL80211_ATTR_IFINDEX, drv->ifindex);
 
-	NLA_PUT_U32(msg, NL80211_ATTR_SCHED_SCAN_INTERVAL, interval);
+	NLA_PUT_U32(msg, NL80211_ATTR_SCHED_SCAN_INTERVAL, long_interval);
+
+	if (drv->capa.sched_scan_intervals_supported) {
+		NLA_PUT_U32(msg,
+			    NL80211_ATTR_SCHED_SCAN_SHORT_INTERVAL,
+			    short_interval);
+
+		NLA_PUT_U8(msg,
+			   NL80211_ATTR_SCHED_SCAN_NUM_SHORT_INTERVALS,
+			   num_short_intervals);
+	}
 
 	if (drv->num_filter_ssids) {
 		match_sets = nlmsg_alloc();
@@ -2611,8 +2656,9 @@ static int wpa_driver_nl80211_sched_scan(void *priv,
 		goto nla_put_failure;
 	}
 
-	wpa_printf(MSG_DEBUG, "nl80211: Sched scan requested (ret=%d) - scan interval %d "
-		   "msec", ret, interval);
+	wpa_printf(MSG_DEBUG, "nl80211: Sched scan requested (ret=%d) "
+		   " scan intervals: short=%d ms long=%d ms num_short_intervals=%d "
+		   , ret, short_interval, long_interval, num_short_intervals);
 
 nla_put_failure:
 	nlmsg_free(ssids);
@@ -4054,6 +4100,9 @@ static int wpa_driver_nl80211_set_ap(void *priv,
 	NLA_PUT_U32(msg, NL80211_ATTR_DTIM_PERIOD, params->dtim_period);
 	NLA_PUT(msg, NL80211_ATTR_SSID, params->ssid_len,
 		params->ssid);
+	if (params->proberesp && params->proberesp_len)
+		NLA_PUT(msg, NL80211_ATTR_PROBE_RESP, params->proberesp_len,
+			params->proberesp);
 	switch (params->hide_ssid) {
 	case NO_SSID_HIDING:
 		NLA_PUT_U32(msg, NL80211_ATTR_HIDDEN_SSID,

@@ -554,6 +554,19 @@ struct wpa_driver_ap_params {
 	 */
 	int beacon_int;
 
+ 	/**
+	 * proberesp - Probe Response template
+	 *
+	 * This is used by drivers that reply to Probe Requests internally in
+	 * AP mode and require the full Probe Response template.
+	 */
+	const u8 *proberesp;
+
+	/**
+	 * proberesp_len - Length of the proberesp buffer in octets
+	 */
+	size_t proberesp_len;
+
 	/**
 	 * ssid - The SSID to use in Beacon/Probe Response frames
 	 */
@@ -695,6 +708,7 @@ struct wpa_driver_capa {
 	int max_scan_ssids;
 	int max_sched_scan_ssids;
 	int sched_scan_supported;
+	int sched_scan_intervals_supported;
 	int max_match_sets;
 
 	/**
@@ -1405,7 +1419,9 @@ struct wpa_driver_ops {
 	 * sched_scan - Request the driver to initiate scheduled scan
 	 * @priv: private driver interface data
 	 * @params: Scan parameters
-	 * @interval: interval between scan cycles
+	 * @long_interval: interval between cycles after short intervals end
+	 * @short_interval: interval between initial short scan cycles
+	 * @num_short_intervals: number of interval short scan intervals
 	 *
 	 * Returns: 0 on success, -1 on failure
 	 *
@@ -1418,7 +1434,8 @@ struct wpa_driver_ops {
 	 * normal host-scheduled scans.
 	 */
 	int (*sched_scan)(void *priv, struct wpa_driver_scan_params *params,
-			  u32 interval);
+			  u32 long_interval, u32 short_interval,
+			  u8 num_short_intervals);
 
 	/**
 	 * stop_sched_scan - Request the driver to stop a scheduled scan
@@ -2705,6 +2722,22 @@ enum wpa_event_type {
 	 * monitoring has been enabled with signal_monitor().
 	 */
 	EVENT_SIGNAL_CHANGE,
+
+	/**
+	 * EVENT_ROAMING_ENABLED - Notify that the driver can do roaming again
+	 *
+	 * This event is used to indicate that the driver can do roaming
+	 * and bgscan after it was previosly disabled
+	 */
+	EVENT_ROAMING_ENABLED,
+
+	/**
+	 * EVENT_ROAMING_DISABLED - Notify that the driver can't do roaming
+	 *
+	 * This event is used to indicate that the driver can't do roaming
+	 * and bgscan and roaming attempts should be disabled
+	 */
+	EVENT_ROAMING_DISABLED,
 
 	/**
 	 * EVENT_INTERFACE_ENABLED - Notify that interface was enabled

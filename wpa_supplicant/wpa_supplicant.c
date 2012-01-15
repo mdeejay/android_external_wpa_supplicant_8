@@ -523,7 +523,7 @@ const char * wpa_supplicant_state_txt(enum wpa_states state)
 
 #ifdef CONFIG_BGSCAN
 
-static void wpa_supplicant_start_bgscan(struct wpa_supplicant *wpa_s)
+void wpa_supplicant_start_bgscan(struct wpa_supplicant *wpa_s)
 {
 	if (wpa_s->current_ssid == wpa_s->bgscan_ssid)
 		return;
@@ -545,7 +545,7 @@ static void wpa_supplicant_start_bgscan(struct wpa_supplicant *wpa_s)
 }
 
 
-static void wpa_supplicant_stop_bgscan(struct wpa_supplicant *wpa_s)
+void wpa_supplicant_stop_bgscan(struct wpa_supplicant *wpa_s)
 {
 	if (wpa_s->bgscan_ssid != NULL) {
 		bgscan_deinit(wpa_s);
@@ -610,7 +610,7 @@ void wpa_supplicant_set_state(struct wpa_supplicant *wpa_s,
 	wpa_s->wpa_state = state;
 
 #ifdef CONFIG_BGSCAN
-	if (state == WPA_COMPLETED)
+	if (state == WPA_COMPLETED && !wpa_s->roaming_disabled)
 		wpa_supplicant_start_bgscan(wpa_s);
 	else
 		wpa_supplicant_stop_bgscan(wpa_s);
@@ -2077,6 +2077,8 @@ int wpa_supplicant_driver_init(struct wpa_supplicant *wpa_s)
 	wpa_drv_flush_pmkid(wpa_s);
 
 	wpa_s->prev_scan_ssid = WILDCARD_SSID_SCAN;
+	wpa_s->prev_scan_wildcard = 0;
+
 	if (wpa_supplicant_enabled_networks(wpa_s->conf)) {
 		int ret;
 		ret = wpa_supplicant_delayed_sched_scan(wpa_s,
@@ -2279,6 +2281,8 @@ next_driver:
 		wpa_s->max_scan_ssids = capa.max_scan_ssids;
 		wpa_s->max_sched_scan_ssids = capa.max_sched_scan_ssids;
 		wpa_s->sched_scan_supported = capa.sched_scan_supported;
+		wpa_s->sched_scan_intervals_supported =
+			capa.sched_scan_intervals_supported;
 		wpa_s->max_match_sets = capa.max_match_sets;
 		wpa_s->max_remain_on_chan = capa.max_remain_on_chan;
 		wpa_s->max_stations = capa.max_stations;
