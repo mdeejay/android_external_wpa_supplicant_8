@@ -151,7 +151,7 @@ static void wfd_buf_update_ie_len(struct wpabuf *buf, u8 *len)
 void wfd_buf_add_device_info(struct wfd_data *wfd, struct wpabuf *buf)
 {
 	wpabuf_put_u8(buf, WFD_DEVICE_INFO_SUBELEM_ID);
-	wpabuf_put_u8(buf, 6);
+	wpabuf_put_be16(buf, 6);
 	if (wfd->associated)
 		wfd->device_info |=  WFD_PREF_CON_TDLS;
 	else
@@ -164,14 +164,14 @@ void wfd_buf_add_device_info(struct wfd_data *wfd, struct wpabuf *buf)
 static void wfd_buf_add_assoc_bssid(struct wfd_data *wfd, struct wpabuf *buf)
 {
 	wpabuf_put_u8(buf, WFD_ASSOC_BSSID_SUBELEM_ID);
-	wpabuf_put_u8(buf, 6);
+	wpabuf_put_be16(buf, 6);
 	wpabuf_put_data(buf, wfd->assoc_bssid, ETH_ALEN);
 }
 
 static void wfd_buf_add_coupled_sink(struct wfd_data *wfd, struct wpabuf *buf)
 {
 	wpabuf_put_u8(buf, WFD_COUPLED_SINK_INFO_SUBELEM_ID);
-	wpabuf_put_u8(buf, 1);
+	wpabuf_put_be16(buf, 1);
 	wpabuf_put_u8(buf, wfd->coupled_sink_status_bitmap);
 }
 
@@ -204,7 +204,7 @@ static struct wpabuf *wfd_build_prob_resp_group(struct wfd_data *wfd)
 {
 	struct wpabuf *buf;
 
-	buf = wpabuf_alloc(257);
+	buf = wpabuf_alloc(258);
 	if (!buf)
 		return NULL;
 	wfd_build_prob_resp_ies(wfd, buf);
@@ -215,7 +215,7 @@ static struct wpabuf *wfd_build_beacon_group(struct wfd_data *wfd)
 {
 	struct wpabuf *buf;
 
-	buf = wpabuf_alloc(257);
+	buf = wpabuf_alloc(258);
 	if (!buf)
 		return NULL;
 	wfd_build_beacon_ies(wfd, buf);
@@ -291,7 +291,7 @@ static void wfd_add_session_info(struct wfd_data *wfd, struct wpabuf *buf)
 				wpabuf_put_u8(buf,
 						WFD_SESSION_INFO_SUBELEM_ID);
 				/* IE length to be filled */
-				len = wpabuf_put(buf, 1);
+				len = wpabuf_put(buf, 2);
 			}
 			dev_count++;
 			wpabuf_put_u8(buf, 23); /* Length */
@@ -304,7 +304,7 @@ static void wfd_add_session_info(struct wfd_data *wfd, struct wpabuf *buf)
 		}
 	}
 	if (dev_count) {
-		*len = 24*dev_count; /* Update subelement length */
+		WPA_PUT_BE16(len, 24*dev_count); /* Update subelement length */
 		wpa_printf(MSG_DEBUG, "%s:...len = %d\n",
 					__func__, 24*dev_count);
 
@@ -468,7 +468,7 @@ int wfd_build_assoc_req_ie(struct wfd_data *wfd, size_t space, u8 *buf)
 		tmplen = wpabuf_len(tmp);
 		if (tmplen > space) {
 			wpa_printf(MSG_DEBUG,
-					"%s:Buffer overflow\n", __func__, tmplen);
+				"%s:Buffer overflow len=%u space=%u\n", __func__, tmplen, space);
 			res = -1;
 		} else {
 			os_memcpy(buf, wpabuf_head(tmp), tmplen);
@@ -712,13 +712,14 @@ int wfd_parse_ies(struct wpabuf *ie, struct wfd_peer_info *peer)
 {
 	const u8 *pos = wpabuf_head_u8(ie);
 	const u8 *end = pos + wpabuf_len(ie);
-	u8 type, len;
+	u16 len;
+	u8  type;
 
 
 	while (pos < end) {
 		type = *pos;
 		pos++;
-		len = *pos;
+		len = WPA_GET_BE16(pos);
 		if (len > end - pos) {
 			wpa_printf(MSG_DEBUG,
 					"Subelement %d overflow\n", type);
@@ -726,15 +727,15 @@ int wfd_parse_ies(struct wpabuf *ie, struct wfd_peer_info *peer)
 		}
 		switch (type) {
 		case WFD_DEVICE_INFO_SUBELEM_ID:
-			peer->device_info_bitmap = WPA_GET_BE16(pos+1);
-			peer->session_mng_port = WPA_GET_BE16(pos+3);
-			peer->maximum_tp =  WPA_GET_BE16(pos+5);
+			peer->device_info_bitmap = WPA_GET_BE16(pos+2);
+			peer->session_mng_port = WPA_GET_BE16(pos+4);
+			peer->maximum_tp =  WPA_GET_BE16(pos+6);
 			break;
 		case WFD_ASSOC_BSSID_SUBELEM_ID:
-			os_memcpy(peer->assoc_bssid, pos + 1, ETH_ALEN);
+			os_memcpy(peer->assoc_bssid, pos + 2, ETH_ALEN);
 			break;
 		case WFD_COUPLED_SINK_INFO_SUBELEM_ID:
-			peer->coupled_sink_status_bitmap = *(pos + 1);
+			peer->coupled_sink_status_bitmap = *(pos + 2);
 			break;
 		case WFD_SESSION_INFO_SUBELEM_ID:
 
@@ -743,7 +744,7 @@ int wfd_parse_ies(struct wpabuf *ie, struct wfd_peer_info *peer)
 			wpa_printf(MSG_DEBUG,
 					"Unsupported subelement %d\n", type);
 		}
-		pos += len + 1;
+		pos += len + 2;
 
 	}
 
