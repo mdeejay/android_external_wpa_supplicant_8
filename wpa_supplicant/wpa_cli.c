@@ -2288,7 +2288,7 @@ static int wpa_cli_cmd_wfd_get(struct wpa_ctrl *ctrl, int argc, char *argv[])
 {
 	char cmd[100];
 	int res, ret;
-	char buf[4096], *pos;
+	char buf[4096];
 	size_t len;
 
 

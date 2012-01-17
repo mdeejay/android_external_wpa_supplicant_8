@@ -2431,6 +2431,11 @@ static int p2p_ctrl_serv_disc_req(struct wpa_supplicant *wpa_s, char *cmd,
 		ref = (unsigned long) wpas_p2p_sd_request_upnp(wpa_s, dst,
 							       version, pos);
 	} else {
+		int is_wfd = 0;
+		if (os_strncmp(pos, "wfd ", 4) == 0) {
+			pos += 4;
+			is_wfd = 1;
+		}
 		len = os_strlen(pos);
 		if (len & 1)
 			return -1;
@@ -2442,8 +2447,12 @@ static int p2p_ctrl_serv_disc_req(struct wpa_supplicant *wpa_s, char *cmd,
 			wpabuf_free(tlvs);
 			return -1;
 		}
-
-		ref = (unsigned long) wpas_p2p_sd_request(wpa_s, dst, tlvs);
+		if (!is_wfd)
+			ref = (unsigned long) wpas_p2p_sd_request(wpa_s, dst, tlvs);
+#ifdef CONFIG_WFD
+		else
+			ref = (unsigned long) wpas_p2p_sd_request_wfd(wpa_s, dst, tlvs);
+#endif /* CONFIG_WFD */
 		wpabuf_free(tlvs);
 	}
 	res = os_snprintf(buf, buflen, "%llx", (long long unsigned) ref);
@@ -2586,7 +2595,56 @@ static int p2p_ctrl_service_add_upnp(struct wpa_supplicant *wpa_s, char *cmd)
 
 	return wpas_p2p_service_add_upnp(wpa_s, version, pos);
 }
+#ifdef CONFIG_WFD
+static int p2p_ctrl_service_add_wfd(struct wpa_supplicant *wpa_s,
+					char *cmd)
+{
+	char *pos;
+	size_t len;
+	struct wpabuf *query, *resp;
 
+	pos = os_strchr(cmd, ' ');
+	if (pos == NULL)
+		return -1;
+	*pos++ = '\0';
+
+	len = os_strlen(cmd);
+	if (len & 1)
+		return -1;
+	len /= 2;
+	query = wpabuf_alloc(len);
+	if (query == NULL)
+		return -1;
+	if (hexstr2bin(cmd, wpabuf_put(query, len), len) < 0) {
+		wpabuf_free(query);
+		return -1;
+	}
+
+	len = os_strlen(pos);
+	if (len & 1) {
+		wpabuf_free(query);
+		return -1;
+	}
+	len /= 2;
+	resp = wpabuf_alloc(len);
+	if (resp == NULL) {
+		wpabuf_free(query);
+		return -1;
+	}
+	if (hexstr2bin(pos, wpabuf_put(resp, len), len) < 0) {
+		wpabuf_free(query);
+		wpabuf_free(resp);
+		return -1;
+	}
+
+	if (wpas_p2p_service_add_wfd(wpa_s, query, resp) < 0) {
+		wpabuf_free(query);
+		wpabuf_free(resp);
+		return -1;
+	}
+	return 0;
+}
+#endif /* CONFIG_WFD */
 
 static int p2p_ctrl_service_add(struct wpa_supplicant *wpa_s, char *cmd)
 {
@@ -2601,6 +2659,10 @@ static int p2p_ctrl_service_add(struct wpa_supplicant *wpa_s, char *cmd)
 		return p2p_ctrl_service_add_bonjour(wpa_s, pos);
 	if (os_strcmp(cmd, "upnp") == 0)
 		return p2p_ctrl_service_add_upnp(wpa_s, pos);
+#ifdef CONFIG_WFD
+	if (os_strcmp(cmd, "wfd") == 0)
+		return p2p_ctrl_service_add_wfd(wpa_s, pos);
+#endif /* CONFIG_WFD */
 	wpa_printf(MSG_DEBUG, "Unknown service '%s'", cmd);
 	return -1;
 }
@@ -2647,6 +2709,31 @@ static int p2p_ctrl_service_del_upnp(struct wpa_supplicant *wpa_s, char *cmd)
 	return wpas_p2p_service_del_upnp(wpa_s, version, pos);
 }
 
+#ifdef CONFIG_WFD
+static int p2p_ctrl_service_del_wfd(struct wpa_supplicant *wpa_s,
+					char *cmd)
+{
+	size_t len;
+	struct wpabuf *query;
+	int ret;
+
+	len = os_strlen(cmd);
+	if (len & 1)
+		return -1;
+	len /= 2;
+	query = wpabuf_alloc(len);
+	if (query == NULL)
+		return -1;
+	if (hexstr2bin(cmd, wpabuf_put(query, len), len) < 0) {
+		wpabuf_free(query);
+		return -1;
+	}
+
+	ret = wpas_p2p_service_del_wfd(wpa_s, query);
+	wpabuf_free(query);
+	return ret;
+}
+#endif /* CONFIG_WFD */
 
 static int p2p_ctrl_service_del(struct wpa_supplicant *wpa_s, char *cmd)
 {
@@ -2661,6 +2748,10 @@ static int p2p_ctrl_service_del(struct wpa_supplicant *wpa_s, char *cmd)
 		return p2p_ctrl_service_del_bonjour(wpa_s, pos);
 	if (os_strcmp(cmd, "upnp") == 0)
 		return p2p_ctrl_service_del_upnp(wpa_s, pos);
+#ifdef CONFIG_WFD
+	if (os_strcmp(cmd, "wfd") == 0)
+		return p2p_ctrl_service_del_wfd(wpa_s, pos);
+#endif /* CONFIG_WFD */
 	wpa_printf(MSG_DEBUG, "Unknown service '%s'", cmd);
 	return -1;
 }

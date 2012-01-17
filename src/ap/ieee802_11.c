@@ -26,6 +26,7 @@
 #include "radius/radius.h"
 #include "radius/radius_client.h"
 #include "p2p/p2p.h"
+#include "wfd/wfd_i.h"
 #include "wps/wps.h"
 #include "hostapd.h"
 #include "beacon.h"

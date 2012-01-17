@@ -18,6 +18,7 @@
 #include "common/ieee802_11_defs.h"
 #include "p2p_i.h"
 #include "p2p.h"
+#include "wfd/wfd_i.h"
 
 
 static struct wpabuf * p2p_build_invitation_req(struct p2p_data *p2p,

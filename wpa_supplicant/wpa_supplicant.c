@@ -2588,6 +2588,7 @@ struct wpa_global * wpa_supplicant_init(struct wpa_params *params)
 		return NULL;
 	dl_list_init(&global->p2p_srv_bonjour);
 	dl_list_init(&global->p2p_srv_upnp);
+	dl_list_init(&global->p2p_srv_wfd);
 	global->params.daemonize = params->daemonize;
 	global->params.wait_for_monitor = params->wait_for_monitor;
 	global->params.dbus_ctrl_interface = params->dbus_ctrl_interface;
